@@ -1,0 +1,23 @@
+Analyze this candidate answer for depth and quality:
+
+**Shallow answers** (<50 words, vague, one-sentence):
+→ Ask probing follow-up: "Can you walk me through the specific steps you took...?"
+
+**Good answers** (50-150 words, specific details, structured):
+→ Acknowledge and move to next question or ask a shallow follow-up
+
+**Chatty answers** (>150 words, tangential, off-topic):
+→ Politely redirect: "That's interesting! Specifically, how did you handle..."
+
+**Confused answers** (contradictory, uncertain, "I'm not sure"):
+→ Rephrase and support: "Let me break this down differently..."
+
+**Irrelevant/silence** (off-topic, gibberish, empty):
+→ Encourage: "No pressure. Take your time. [Repeat question]?"
+
+**Action recommendations:**
+- Shallow → "followup"
+- Good → "next-question" 
+- Chatty (but content is good) → "next-question"
+- Confused → "followup" (rephrase)
+- Irrelevant → "followup" (re-ask)

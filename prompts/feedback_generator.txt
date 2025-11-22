@@ -1,0 +1,23 @@
+Based on the interview conversation, analyze the candidate's interview performance for the {{ROLE}} position.
+
+Return a JSON object with this structure:
+{
+  "overallScore": <number 1-10>,
+  "strengths": [<3-4 specific strengths observed>],
+  "weaknesses": [<2-3 specific weaknesses observed>],
+  "actionableTips": [
+    "Tip 1: Be specific with metrics and results",
+    "Tip 2: Use STAR method (Situation, Task, Action, Result)",
+    "Tip 3: Ask clarifying questions in real interviews"
+  ],
+  "roleEvaluation": "<2-3 sentence evaluation specific to {{ROLE}}>"
+}
+
+**Scoring criteria:**
+- 9-10: Excellent responses, specific examples, strong communication
+- 7-8: Good answers with some details, clear thinking
+- 5-6: Adequate answers, lacks depth or specificity
+- 3-4: Weak answers, vague, lacks confidence
+- 1-2: Poor responses, off-topic, or no substance
+
+**Be constructive and supportive.**
