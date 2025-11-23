@@ -21,7 +21,8 @@ export async function POST(request: NextRequest) {
       action: result.action,
       assistantResponse: result.assistantResponse,
       turnCount: result.turnCount,
-      maxTurns: result.maxTurns
+      maxTurns: result.maxTurns,
+      detectedPersona: result.detectedPersona
     }
 
     return NextResponse.json(response, { status: 200 })

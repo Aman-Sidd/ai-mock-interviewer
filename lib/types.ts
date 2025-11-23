@@ -15,7 +15,7 @@ export interface Message {
 export interface InterviewSession {
   id: string
   role: Role
-  persona: Persona
+  detectedPersona: Persona | null // Will be detected from user responses
   duration: number // minutes
   turnCount: number
   maxTurns: number // 4-6
@@ -28,14 +28,20 @@ export interface InterviewSession {
 export interface FeedbackReport {
   overallScore: number // 1-10
   strengths: string[]
-  weaknesses: string[]
+  weaknesses?: string[] // deprecated, use areasForImprovement
+  areasForImprovement?: string[]
   actionableTips: string[]
   roleEvaluation: string
+  communicationQuality?: string
+  depthOfThinking?: string
+  specificExamples?: string
+  problemSolvingApproach?: string
+  collaboration?: string
+  selfAwareness?: string
 }
 
 export interface StartInterviewRequest {
   role: Role
-  persona: Persona
   duration: number
 }
 
@@ -56,6 +62,7 @@ export interface SubmitAnswerResponse {
   assistantResponse: string
   turnCount: number
   maxTurns: number
+  detectedPersona?: Persona | null
 }
 
 export interface GetFeedbackResponse {

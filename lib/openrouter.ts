@@ -1,18 +1,13 @@
 /**
- * OpenRouter SDK wrapper for Deepseek API integration
- * Uses the `openai` npm package configured for OpenRouter endpoint
+ * Groq SDK wrapper for LLM API integration
+ * Uses the `groq-sdk` npm package for fast LLM inference
  */
 
-import OpenAI from 'openai'
+import { Groq } from 'groq-sdk'
 
-// Initialize OpenRouter client
-const openrouter = new OpenAI({
-  baseURL: 'https://openrouter.ai/api/v1',
-  apiKey: process.env.OPENROUTER_API_KEY,
-  defaultHeaders: {
-    'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
-    'X-Title': 'AI Interview Practice Partner'
-  }
+// Initialize Groq client
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY
 })
 
 export interface Message {
@@ -26,7 +21,7 @@ export interface GenerateOptions {
 }
 
 /**
- * Generate a response using Deepseek via OpenRouter
+ * Generate a response using Groq
  * @param messages - Conversation history with system prompt
  * @param options - Temperature and max_tokens
  * @returns Assistant's response text
@@ -35,33 +30,54 @@ export async function generateResponse(
   messages: Message[],
   options: GenerateOptions = {}
 ): Promise<string> {
-  if (!process.env.OPENROUTER_API_KEY) {
-    throw new Error('OPENROUTER_API_KEY is not configured. Please add it to .env.local')
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY is not configured. Please add it to .env.local')
   }
 
   const maxRetries = 5
   let lastError: Error | null = null
+  const modelName = 'llama-3.1-8b-instant'
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const response = await openrouter.chat.completions.create({
-        model: 'openai/gpt-oss-20b:free',
-        messages,
+      console.log(`\n[Groq] Attempt ${attempt}/${maxRetries}`)
+      console.log(`[Groq] Model: ${modelName}`)
+      console.log(`[Groq] Messages: ${messages.length} items`)
+      
+      const response = await groq.chat.completions.create({
+        model: modelName,
+        messages: messages as any,
         temperature: options.temperature ?? 0.7,
-        max_tokens: options.max_tokens ?? 1000
+        max_completion_tokens: options.max_tokens ?? 1000
       })
 
-      const content = response.choices[0]?.message?.content
+      console.log(`[Groq] Response structure:`, {
+        has_choices: !!response.choices,
+        choices_length: response.choices?.length,
+        first_choice_keys: response.choices?.[0] ? Object.keys(response.choices[0]) : 'N/A',
+        message_keys: response.choices?.[0]?.message ? Object.keys(response.choices[0].message) : 'N/A'
+      })
+
+      const content = response.choices?.[0]?.message?.content
+      console.log(`[Groq] Content type: ${typeof content}, length: ${content?.length || 0}`)
+      
       if (!content) {
-        throw new Error('No content in OpenRouter response')
+        console.error(`[Groq] FULL RESPONSE:`, JSON.stringify(response, null, 2))
+        throw new Error('No content in Groq response')
       }
 
+      console.log(`[Groq] ✓ Success on attempt ${attempt}`)
       return content
     } catch (error: any) {
       lastError = error as Error
       const status = error?.status || error?.code
       
-      console.error(`OpenRouter attempt ${attempt}/${maxRetries} failed (status: ${status}):`, error?.message)
+      console.error(`[Groq] ✗ Attempt ${attempt}/${maxRetries} failed`)
+      console.error(`[Groq] Status: ${status}`)
+      console.error(`[Groq] Error message: ${error?.message}`)
+      if (attempt === maxRetries) {
+        console.error(`[Groq] FULL ERROR:`, error)
+      }
 
       // For 429 (rate limit), use longer backoff; for other errors, standard backoff
       let delayMs = 0
@@ -73,7 +89,7 @@ export async function generateResponse(
           // Other errors: 1s, 2s, 4s, 8s, 16s (exponential backoff)
           delayMs = Math.pow(2, attempt - 1) * 1000
         }
-        console.log(`Retrying in ${delayMs}ms...`)
+        console.log(`[Groq] ⏳ Retrying in ${delayMs}ms...`)
         await new Promise((resolve) => setTimeout(resolve, delayMs))
       }
     }

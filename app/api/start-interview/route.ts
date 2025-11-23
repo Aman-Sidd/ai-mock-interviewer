@@ -5,13 +5,13 @@ import { StartInterviewRequest, StartInterviewResponse } from '@/lib/types'
 export async function POST(request: NextRequest) {
   try {
     const body: StartInterviewRequest = await request.json()
-    const { role, persona, duration } = body
+    const { role, duration } = body
 
-    if (!role || !persona || !duration) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+    if (!role || !duration) {
+      return NextResponse.json({ error: 'Missing required fields: role, duration' }, { status: 400 })
     }
 
-    const { sessionId, firstQuestion } = await startSession(role, persona, duration)
+    const { sessionId, firstQuestion } = await startSession(role, duration)
 
     const response: StartInterviewResponse = {
       sessionId,

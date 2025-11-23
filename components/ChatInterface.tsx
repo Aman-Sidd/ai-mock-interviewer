@@ -20,6 +20,7 @@ export default function ChatInterface({ sessionId, onInterviewComplete }: ChatIn
   const [turnInfo, setTurnInfo] = useState({ current: 0, max: 6 })
   const [interviewComplete, setInterviewComplete] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [detectedPersona, setDetectedPersona] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -67,6 +68,11 @@ export default function ChatInterface({ sessionId, onInterviewComplete }: ChatIn
         throw new Error(data.error || 'Failed to submit answer')
       }
 
+      // Capture detected persona after first response
+      if (data.detectedPersona && !detectedPersona) {
+        setDetectedPersona(data.detectedPersona)
+      }
+
       setMessages((prev) => [...prev, { speaker: 'assistant', content: data.assistantResponse }])
       setTurnInfo({ current: data.turnCount, max: data.maxTurns })
 
@@ -89,7 +95,14 @@ export default function ChatInterface({ sessionId, onInterviewComplete }: ChatIn
         {/* Header */}
         <div className="bg-white rounded-t-lg shadow-md p-4 border-b">
           <div className="flex justify-between items-center">
-            <h2 className="text-xl font-bold text-gray-800">Interview in Progress</h2>
+            <div>
+              <h2 className="text-xl font-bold text-gray-800">Interview in Progress</h2>
+              {detectedPersona && (
+                <p className="text-xs text-blue-600 mt-1">
+                  <span className="bg-blue-100 px-2 py-1 rounded">Communication Style: {detectedPersona}</span>
+                </p>
+              )}
+            </div>
             <div className="text-sm text-gray-600">
               Turn {turnInfo.current} / {turnInfo.max}
             </div>

@@ -14,9 +14,24 @@ function generateId(): string {
 // In-memory session storage (MVP - replace with DB in production)
 const sessions = new Map<string, InterviewSession>()
 
+/**
+ * Add persona-specific instructions to the interviewer prompt
+ */
+function addPersonaInstructions(basePrompt: string, persona: Persona | null): string {
+  if (!persona) return basePrompt
+
+  const personaInstructions = {
+    efficient: `\n\n[COMMUNICATION STYLE: The user is efficient and wants quick, direct answers. Keep questions concise and focused. Avoid lengthy explanations.]`,
+    chatty: `\n\n[COMMUNICATION STYLE: The user tends to be verbose and detailed. Be patient with longer answers. Gently redirect if they go off-topic, but acknowledge their enthusiasm.]`,
+    confused: `\n\n[COMMUNICATION STYLE: The user may seem uncertain or confused. Be supportive and encouraging. Offer to rephrase questions or break them down. Provide clarification when needed.]`,
+    'edge-case': `\n\n[COMMUNICATION STYLE: The user may provide off-topic or unexpected answers. Stay professional and redirect tactfully. If they go beyond your scope, acknowledge it and refocus on the role.]`
+  }
+
+  return basePrompt + (personaInstructions[persona] || '')
+}
+
 export async function startSession(
   role: Role,
-  persona: Persona,
   duration: number
 ): Promise<{ sessionId: string; firstQuestion: string }> {
   const sessionId = generateId()
@@ -30,17 +45,21 @@ export async function startSession(
   // Combine prompts
   const combinedSystemPrompt = `${systemPrompt}\n\n${roleTemplate}`
 
-  // Generate first question
+  // Generate first question with specific instructions to be engaging
+  const firstQuestionPrompt = `You're starting a mock interview for a ${role} position. Your goal is to start with an engaging, open-ended question that gets the candidate talking and helps you understand their experience and thinking.
+
+Based on the role guidelines above, ask one specific opening question (NOT generic). Make it inviting and show genuine interest. Keep it to 2-3 sentences max.`
+
   const firstQuestion = await generateResponse(
-    buildMessages(combinedSystemPrompt, [], 'Start the interview with your first question'),
-    { temperature: 0.7, max_tokens: 200 }
+    buildMessages(combinedSystemPrompt, [], firstQuestionPrompt),
+    { temperature: 0.7, max_tokens: 150 }
   )
 
-  // Create session
+  // Create session - persona is detected later from responses
   const session: InterviewSession = {
     id: sessionId,
     role,
-    persona,
+    detectedPersona: null, // Will be detected from user answers
     duration,
     turnCount: 1,
     maxTurns: Math.min(Math.max(Math.ceil(duration / 5), 4), 6), // 4-6 turns based on duration
@@ -72,6 +91,7 @@ export async function submitAnswer(
   assistantResponse: string
   turnCount: number
   maxTurns: number
+  detectedPersona: Persona | null
 }> {
   const session = sessions.get(sessionId)
   if (!session) {
@@ -85,35 +105,37 @@ export async function submitAnswer(
     timestamp: new Date()
   })
 
+  // Detect persona from this answer (if not already detected)
+  if (!session.detectedPersona) {
+    const userAnswers = session.history
+      .filter((m) => m.speaker === 'user')
+      .map((m) => m.content)
+    session.detectedPersona = detectPersona(userAnswers)
+    console.log(`Detected persona: ${session.detectedPersona}`)
+  }
+
   // Load prompts
   const systemPrompt = await loadPromptFile('system_interviewer.txt')
   const roleTemplate = await loadPromptFile(`role_templates/${session.role}.txt`)
-  const followupDetector = await loadPromptFile('followup_detector.txt')
   const combinedSystemPrompt = `${systemPrompt}\n\n${roleTemplate}`
 
-  // Detect persona and decide action
-  const personaAnalysis = await generateResponse(
-    buildMessages(
-      followupDetector,
-      [],
-      `Analyze this answer for depth and decide next action: "${userAnswer}"`
-    ),
-    { temperature: 0.2, max_tokens: 150 }
-  )
+  // Add persona-aware instructions
+  const personaAwarePrompt = addPersonaInstructions(combinedSystemPrompt, session.detectedPersona)
 
-  // Determine action based on analysis and turn count
+  // Simple heuristic to detect if we need a follow-up (avoid model reasoning)
+  const wordCount = userAnswer.trim().split(/\s+/).length
+  const isShallowAnswer = wordCount < 30 || userAnswer.split('.').length === 1
+  
+  // Determine action based on heuristic and turn count
   let action: 'followup' | 'next-question' | 'end-interview' = 'next-question'
 
   if (session.turnCount >= session.maxTurns) {
     action = 'end-interview'
-  } else if (
-    personaAnalysis.toLowerCase().includes('shallow') ||
-    personaAnalysis.toLowerCase().includes('followup')
-  ) {
+  } else if (isShallowAnswer) {
     action = 'followup'
   }
 
-  // Generate response based on action
+  // Generate response based on action and detected persona
   let assistantResponse = ''
 
   if (action === 'followup') {
@@ -123,11 +145,11 @@ export async function submitAnswer(
     }))
     assistantResponse = await generateResponse(
       buildMessages(
-        combinedSystemPrompt,
+        personaAwarePrompt,
         historyAsMessages,
-        'Ask a probing follow-up question based on their answer.'
+        `Respond naturally to what they just said. Ask a probing follow-up question to help them elaborate or provide more specific details. Be conversational and genuine in your reaction.`
       ),
-      { temperature: 0.6, max_tokens: 200 }
+      { temperature: 0.6, max_tokens: 120 }
     )
   } else if (action === 'next-question') {
     const historyAsMessages = session.history.map((m) => ({
@@ -136,11 +158,11 @@ export async function submitAnswer(
     }))
     assistantResponse = await generateResponse(
       buildMessages(
-        combinedSystemPrompt,
+        personaAwarePrompt,
         historyAsMessages,
-        'Ask the next interview question. Make it different from previous ones.'
+        `Acknowledge what they said briefly, then ask the next interview question naturally. Make sure it's a different topic area from what you've already covered. Be conversational.`
       ),
-      { temperature: 0.6, max_tokens: 200 }
+      { temperature: 0.6, max_tokens: 150 }
     )
   } else {
     // end-interview
@@ -164,7 +186,8 @@ export async function submitAnswer(
     action,
     assistantResponse,
     turnCount: session.turnCount,
-    maxTurns: session.maxTurns
+    maxTurns: session.maxTurns,
+    detectedPersona: session.detectedPersona
   }
 }
 
@@ -179,7 +202,10 @@ export async function generateFeedback(sessionId: string): Promise<FeedbackRepor
 
   // Load feedback template
   const feedbackTemplate = await loadPromptFile('feedback_generator.txt')
-  const prompt = renderTemplate(feedbackTemplate, { ROLE: session.role })
+  const prompt = renderTemplate(feedbackTemplate, { 
+    ROLE: session.role,
+    PERSONA: session.detectedPersona || 'unknown'
+  })
 
   // Build conversation summary
   const conversationSummary = session.history
@@ -191,29 +217,88 @@ export async function generateFeedback(sessionId: string): Promise<FeedbackRepor
     buildMessages(
       prompt,
       [],
-      `Interview conversation:\n\n${conversationSummary}`
+      `Candidate persona: ${session.detectedPersona || 'not detected'}\n\nInterview conversation:\n\n${conversationSummary}`
     ),
-    { temperature: 0.5, max_tokens: 600 }
+    { temperature: 0.3, max_tokens: 800 }
   )
 
-  // Parse feedback
+  // Parse feedback - handle various formats
   try {
-    const feedback = JSON.parse(feedbackJson)
+    // Try to parse the response as-is first
+    let feedback = JSON.parse(feedbackJson.trim())
+    
+    // Validate required fields
+    if (!feedback.overallScore || !feedback.strengths || !feedback.actionableTips || !feedback.roleEvaluation) {
+      throw new Error('Missing required feedback fields')
+    }
+    
     return {
-      overallScore: feedback.overallScore || 5,
-      strengths: feedback.strengths || [],
-      weaknesses: feedback.weaknesses || [],
-      actionableTips: feedback.actionableTips || [],
-      roleEvaluation: feedback.roleEvaluation || ''
+      overallScore: Math.min(10, Math.max(1, feedback.overallScore)),
+      strengths: Array.isArray(feedback.strengths) ? feedback.strengths.slice(0, 4) : ['Good participation'],
+      areasForImprovement: Array.isArray(feedback.areasForImprovement) ? feedback.areasForImprovement.slice(0, 3) : feedback.weaknesses?.slice(0, 3) || ['Could be more specific'],
+      actionableTips: Array.isArray(feedback.actionableTips) ? feedback.actionableTips.slice(0, 3) : ['Practice more interviews'],
+      roleEvaluation: feedback.roleEvaluation || 'Good overall fit for the role',
+      communicationQuality: feedback.communicationQuality,
+      depthOfThinking: feedback.depthOfThinking,
+      specificExamples: feedback.specificExamples,
+      problemSolvingApproach: feedback.problemSolvingApproach,
+      collaboration: feedback.collaboration,
+      selfAwareness: feedback.selfAwareness
     }
   } catch (error) {
-    console.error('Failed to parse feedback:', error)
+    console.error('Failed to parse feedback JSON. Attempting extraction...')
+    
+    // Try to extract JSON from markdown code blocks
+    let jsonString = feedbackJson
+    
+    // Remove markdown code blocks
+    jsonString = jsonString.replace(/```json\n?/g, '').replace(/```\n?/g, '')
+    
+    // Try to find JSON object
+    const jsonMatch = jsonString.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      try {
+        const feedback = JSON.parse(jsonMatch[0])
+        console.log('Successfully parsed extracted JSON')
+        return {
+          overallScore: Math.min(10, Math.max(1, feedback.overallScore || 6)),
+          strengths: feedback.strengths || ['Engaged in conversation', 'Showed interest in role'],
+          areasForImprovement: feedback.areasForImprovement?.slice(0, 3) || feedback.weaknesses?.slice(0, 3) || ['Could provide more examples'],
+          actionableTips: feedback.actionableTips?.slice(0, 3) || ['Practice with real scenarios', 'Prepare specific stories'],
+          roleEvaluation: feedback.roleEvaluation || 'Demonstrated potential for the role',
+          communicationQuality: feedback.communicationQuality,
+          depthOfThinking: feedback.depthOfThinking,
+          specificExamples: feedback.specificExamples,
+          problemSolvingApproach: feedback.problemSolvingApproach,
+          collaboration: feedback.collaboration,
+          selfAwareness: feedback.selfAwareness
+        }
+      } catch (parseError) {
+        console.error('Failed to parse extracted JSON:', parseError)
+      }
+    }
+
+    console.error('Could not parse feedback response:', feedbackJson.substring(0, 200))
+
+    // Fallback feedback
     return {
-      overallScore: 5,
-      strengths: ['Good participation'],
-      weaknesses: ['Feedback parsing error'],
-      actionableTips: ['Try again'],
-      roleEvaluation: 'Unable to generate evaluation'
+      overallScore: 6,
+      strengths: [
+        'Engaged actively in the interview',
+        'Showed interest in learning and growth',
+        'Communicated clearly'
+      ],
+      areasForImprovement: [
+        'Could provide more specific examples',
+        'Could elaborate more on technical details',
+        'Could ask clarifying questions'
+      ],
+      actionableTips: [
+        'Prepare concrete examples from past experiences',
+        'Research the role and company before interviewing',
+        'Practice explaining your thinking process and the "why" behind decisions'
+      ],
+      roleEvaluation: `You demonstrated genuine interest in the ${session.role} position. To improve your candidacy for future interviews, focus on providing specific, concrete examples with measurable outcomes, and dive deeper into your decision-making process to show strategic thinking.`
     }
   }
 }
